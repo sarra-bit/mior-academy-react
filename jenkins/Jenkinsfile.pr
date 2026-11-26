@@ -1,0 +1,80 @@
+pipeline {
+  agent any
+
+  options {
+    timestamps()
+    timeout(time: 20, unit: 'MINUTES')
+    disableConcurrentBuilds()
+  }
+
+  environment {
+    COMPOSE_PROJECT_NAME = "mior-pr-${env.CHANGE_ID ?: 'manual'}"
+    // Jenkins tourne dans un conteneur : l'application est publiee sur l'hote Docker
+    BACKEND_URL  = 'http://host.docker.internal:3000'
+    FRONTEND_URL = 'http://host.docker.internal:8090'
+  }
+
+  stages {
+
+    stage('Checkout') {
+      steps {
+        checkout scm
+        sh 'git log -1 --oneline'
+      }
+    }
+
+    stage('Setup') {
+      steps {
+        sh '''
+          mkdir -p reports
+          docker --version
+          docker compose version
+          chmod +x scripts/smoke.sh
+        '''
+      }
+    }
+
+    stage('Build') {
+      steps {
+        sh '''
+          docker compose build > reports/build.log 2>&1 || { cat reports/build.log; exit 1; }
+          tail -n 20 reports/build.log
+        '''
+      }
+    }
+
+    stage('Run (Docker)') {
+      steps {
+        sh 'docker compose up -d'
+        sh 'docker compose ps'
+      }
+    }
+
+    stage('Smoke Test') {
+      steps {
+        // le stage devient rouge si le smoke test echoue, mais l'archivage continue
+        catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
+          sh 'bash scripts/smoke.sh'
+        }
+      }
+    }
+
+    stage('Archive Artifacts') {
+      steps {
+        sh 'docker compose logs > reports/containers.log 2>&1 || true'
+        writeFile file: 'reports/pipeline-report.txt',
+                  text: "Build: #${env.BUILD_NUMBER}\nPR: ${env.CHANGE_ID}\nBranche: ${env.CHANGE_BRANCH} -> ${env.CHANGE_TARGET}\nURL: ${env.BUILD_URL}\n"
+        archiveArtifacts artifacts: 'reports/**', allowEmptyArchive: true
+      }
+    }
+  }
+
+  post {
+    always {
+      // Cleanup : on arrete et supprime les conteneurs, reseaux et volumes
+      sh 'docker compose down -v || true'
+    }
+    success { echo 'PR OK : smoke test PASSED' }
+    failure { echo 'PR KO : un stage a echoue (voir les logs et les artefacts)' }
+  }
+}

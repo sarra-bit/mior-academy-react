@@ -119,3 +119,4 @@ les anciens mots de passe stockés en clair sont acceptés une fois puis hachés
 - [x] Phase 4 — admin : gestion formations, formateurs, sessions, groupes, inscriptions, comptes
 - [x] Phase 5 — formateur : sessions (+ annulation), disponibilités, appel / présences, alertes d'absence
 - [x] Phase 6 — attestations PDF + QR code + vérification, messagerie, alertes d'absence, suivi des présences (admin)
+## CI : Build et Smoke sur Pull Request via Jenkins

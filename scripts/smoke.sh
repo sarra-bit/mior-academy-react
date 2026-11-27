@@ -30,11 +30,11 @@ for i in $(seq 1 30); do
 done
 
 echo "== Tests ==" | tee -a "$REPORT"
-check "Backend /health"            "$BACKEND_URL/health"        404
-check "Backend /version"           "$BACKEND_URL/version"       404
-check "Backend API formations"     "$BACKEND_URL/api/formations" 404
-check "Frontend page d'accueil"    "$FRONTEND_URL/"             404
-check "Frontend -> backend (nginx)" "$FRONTEND_URL/health"      404
+check "Backend /health"            "$BACKEND_URL/health"        200
+check "Backend /version"           "$BACKEND_URL/version"       200
+check "Backend API formations"     "$BACKEND_URL/api/formations" 200
+check "Frontend page d'accueil"    "$FRONTEND_URL/"             200
+check "Frontend -> backend (nginx)" "$FRONTEND_URL/health"      200
 
 body=$(curl -s --max-time 5 "$BACKEND_URL/health")
 if echo "$body" | grep -q '"database":"UP"'; then

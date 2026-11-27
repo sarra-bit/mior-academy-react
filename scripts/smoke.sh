@@ -5,7 +5,7 @@
 BACKEND_URL="${BACKEND_URL:-http://localhost:3000}"
 FRONTEND_URL="${FRONTEND_URL:-http://localhost:8090}"
 REPORT_DIR="reports"
-REPORT="$REPORT_DIR/smoke-result.txt"
+REPORT="$REPORT_DIR/${REPORT_NAME:-smoke-result.txt}"
 FAILED=0
 
 mkdir -p "$REPORT_DIR"

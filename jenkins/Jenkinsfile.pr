@@ -3,15 +3,12 @@ pipeline {
 
   options {
     timestamps()
-    timeout(time: 20, unit: 'MINUTES')
+    timeout(time: 25, unit: 'MINUTES')
     disableConcurrentBuilds()
   }
 
   environment {
-    COMPOSE_PROJECT_NAME = "mior-pr-${env.CHANGE_ID ?: 'manual'}"
-    // Jenkins tourne dans un conteneur : l'application est publiee sur l'hote Docker
-    BACKEND_URL  = 'http://host.docker.internal:3000'
-    FRONTEND_URL = 'http://host.docker.internal:8090'
+    PR_ID = "${env.CHANGE_ID ?: 'manual'}"
   }
 
   stages {
@@ -34,36 +31,63 @@ pipeline {
       }
     }
 
-    stage('Build') {
-      steps {
-        sh '''
-          docker compose build > reports/build.log 2>&1 || { cat reports/build.log; exit 1; }
-          tail -n 20 reports/build.log
-        '''
-      }
-    }
+    // Parallelisation : une execution complete par version de runtime Node
+    stage('Matrix Node') {
+      matrix {
+        axes {
+          axis {
+            name 'NODE_VERSION'
+            values '18', '20'
+          }
+        }
+        environment {
+          COMPOSE_PROJECT_NAME = "mior-pr-${PR_ID}-node${NODE_VERSION}"
+          BACKEND_PORT  = "30${NODE_VERSION}"
+          FRONTEND_PORT = "81${NODE_VERSION}"
+          // Jenkins tourne dans un conteneur : l'application est publiee sur l'hote Docker
+          BACKEND_URL   = "http://host.docker.internal:30${NODE_VERSION}"
+          FRONTEND_URL  = "http://host.docker.internal:81${NODE_VERSION}"
+          REPORT_NAME   = "smoke-node${NODE_VERSION}.txt"
+        }
+        stages {
 
-    stage('Run (Docker)') {
-      steps {
-        sh 'docker compose up -d'
-        sh 'docker compose ps'
-      }
-    }
+          stage('Build') {
+            steps {
+              sh '''
+                docker compose build > reports/build-node${NODE_VERSION}.log 2>&1 || { cat reports/build-node${NODE_VERSION}.log; exit 1; }
+                tail -n 15 reports/build-node${NODE_VERSION}.log
+              '''
+            }
+          }
 
-    stage('Smoke Test') {
-      steps {
-        // le stage devient rouge si le smoke test echoue, mais l'archivage continue
-        catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
-          sh 'bash scripts/smoke.sh'
+          stage('Run (Docker)') {
+            steps {
+              sh 'docker compose up -d'
+              sh 'docker compose ps'
+            }
+          }
+
+          stage('Smoke Test') {
+            steps {
+              // le stage devient rouge si le smoke test echoue, l'archivage continue
+              catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
+                sh 'bash scripts/smoke.sh'
+              }
+            }
+          }
         }
       }
     }
 
     stage('Archive Artifacts') {
       steps {
-        sh 'docker compose logs > reports/containers.log 2>&1 || true'
+        sh '''
+          for v in 18 20; do
+            docker compose -p "mior-pr-${PR_ID}-node$v" logs > reports/containers-node$v.log 2>&1 || true
+          done
+        '''
         writeFile file: 'reports/pipeline-report.txt',
-                  text: "Build: #${env.BUILD_NUMBER}\nPR: ${env.CHANGE_ID}\nBranche: ${env.CHANGE_BRANCH} -> ${env.CHANGE_TARGET}\nURL: ${env.BUILD_URL}\n"
+                  text: "Build: #${env.BUILD_NUMBER}\nPR: ${env.CHANGE_ID}\nBranche: ${env.CHANGE_BRANCH} -> ${env.CHANGE_TARGET}\nVersions Node testees: 18, 20\nURL: ${env.BUILD_URL}\n"
         archiveArtifacts artifacts: 'reports/**', allowEmptyArchive: true
       }
     }
@@ -71,10 +95,14 @@ pipeline {
 
   post {
     always {
-      // Cleanup : on arrete et supprime les conteneurs, reseaux et volumes
-      sh 'docker compose down -v || true'
+      // Cleanup : conteneurs, reseaux et volumes des 2 versions
+      sh '''
+        for v in 18 20; do
+          docker compose -p "mior-pr-${PR_ID}-node$v" down -v || true
+        done
+      '''
     }
-    success { echo 'PR OK : smoke test PASSED' }
-    failure { echo 'PR KO : un stage a echoue (voir les logs et les artefacts)' }
+    success { echo 'PR OK : smoke test PASSED (Node 18 et Node 20)' }
+    failure { echo 'PR KO : un stage a echoue (voir logs et artefacts)' }
   }
 }
